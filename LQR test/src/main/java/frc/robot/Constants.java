@@ -69,22 +69,22 @@ public final class Constants {
       public static final PID SWERVE_ROTATOR_PID = new PID(0.0085);
       public static final PID SWERVE_DRIVER_PID = new PID(0.65);
       public static final LQR SWERVE_ROTATOR_LQR = new LQR(
-              0,
-              0,
+              0.2,
+              0.2,
               0.3,
               0.2,
-              0,
-              0,
+              0.2,
+              0.2,
               0.0195,
               10
       );
       public static final LQR SWERVE_DRIVER_LQR = new LQR(
-              0,
-              0,
+              0.2,
+              0.2,
               0.3,
               0.2,
-              0,
-              0,
+              0.2,
+              0.2,
               0.0195,
               10
       );

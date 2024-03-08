@@ -1,24 +1,24 @@
-package frc.robot.subsystems.swerve;
+package frc.robot.subsystems;
 
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.NeutralModeValue;
-import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 import frc.robot.Constants.RobotInfo.SwerveInfo;
 import frc.robot.Constants.SwerveModuleConfig;
 import math.MathUtil;
 
-public class SwerveModule {
+public class SwerveModule extends SubsystemBase{
     private final TalonFX driver, rotator;
     private final CANcoder rotationEncoder;
-    private final PIDController rotationPID;
-    private final PIDController driverPID;
+    private final LQR rotationController;
+    private final LQR driverController;
 
     private final double rotationOffsetDegrees;
     private final double driveConversionFactor;
@@ -29,11 +29,11 @@ public class SwerveModule {
 
         driver = switch (Constants.currentRobot) {
             case ZEUS -> new TalonFX(swerveModuleData.driveMotorID());
-            case SIREN -> new TalonFX(swerveModuleData.driveMotorID(), "Canivore1");
+            case CADENZA -> new TalonFX(swerveModuleData.driveMotorID(), "Canivore1");
         };
         rotator = switch (Constants.currentRobot) {
             case ZEUS -> new TalonFX(swerveModuleData.rotatorMotorID());
-            case SIREN -> new TalonFX(swerveModuleData.rotatorMotorID(), "Canivore1");
+            case CADENZA -> new TalonFX(swerveModuleData.rotatorMotorID(), "Canivore1");
         };
         rotator.setInverted(true);
 
@@ -42,24 +42,14 @@ public class SwerveModule {
 
         rotationEncoder = switch(Constants.currentRobot) {
             case ZEUS -> new CANcoder(swerveModuleData.encoderID());
-            case SIREN -> new CANcoder(swerveModuleData.encoderID(), "Canivore1");
+            case CADENZA -> new CANcoder(swerveModuleData.encoderID(), "Canivore1");
         };
 
         rotationOffsetDegrees = swerveModuleData.rotationOffset();
 
-        rotationPID = SwerveInfo.SWERVE_ROTATOR_PID.create(swerveModuleData.rotatorPIDkPMultiplier());
-        rotationPID.setTolerance(0.1);
-        rotationPID.enableContinuousInput(-180, 180);
+        rotationController = SwerveInfo.SWERVE_ROTATOR_LQR.create();
 
-        driverPID = SwerveInfo.SWERVE_DRIVER_PID.create(SwerveInfo.K_P_MULTIPLIER); //drive change
-        driverPID.setTolerance(0.1); //drive change
-
-        CurrentLimitsConfigs motorCurrentLimiter = new CurrentLimitsConfigs()
-                .withStatorCurrentLimit(26)
-                .withStatorCurrentLimitEnable(true);
-
-        driver.getConfigurator().apply(motorCurrentLimiter);
-        rotator.getConfigurator().apply(motorCurrentLimiter);
+        driverController = SwerveInfo.SWERVE_DRIVER_LQR;
     }
 
     private static boolean isNegligible(SwerveModuleState state) {
@@ -67,25 +57,26 @@ public class SwerveModule {
     }
 
     public void reset() {
-        rotationPID.reset();
+        rotationController.reset();
     }
 
     public void periodic() {
         int moduleID = rotator.getDeviceID() / 2;
         double currModuleRotation = getRotationInDegrees();
+        rotationController.setSetpoint(currModuleRotation, currModuleRotation);
+        driverController.setSetpoint(targetSpeed, getDriveVelocity());
 
         SmartDashboard.putString("Module %d current rotation".formatted(moduleID), "%.2f degrees".formatted(currModuleRotation));
 
-        double rotatorPIDOutput = rotationPID.calculate(currModuleRotation);
-        double driverPIDOutput = - driverPID.calculate(targetSpeed); //drive change
+        double rotatorOutput = rotationController.getVoltage();
+        double driverOutput = - driverController.getVoltage(); //drive change
 
         SmartDashboard.putString("Module %d target speed".formatted(moduleID), "%.2f".formatted(targetSpeed));
-        SmartDashboard.putString("Module %d target rotation".formatted(moduleID), "%.2f degrees".formatted(rotationPID.getSetpoint()));
-        SmartDashboard.putString("Module %d rotator PID output".formatted(moduleID), "%.2f".formatted(rotatorPIDOutput));
-        SmartDashboard.putNumber("Error", driverPID.getVelocityError());
+        SmartDashboard.putString("Module %d target rotation".formatted(moduleID), "%.2f degrees".formatted(rotationController.getSetpoint()));
+        SmartDashboard.putString("Module %d rotator PID output".formatted(moduleID), "%.2f".formatted(rotatorOutput));
 
-        rotator.set(rotatorPIDOutput);
-        driver.set(driverPIDOutput * SwerveInfo.MOVEMENT_SPEED); //drive change-to do: change targetSpeed to driverPIDOutput
+        rotator.set(rotatorOutput);
+        driver.set(driverOutput * SwerveInfo.MOVEMENT_SPEED); //drive change-to do: change targetSpeed to driverPIDOutput
     }
 
     public double getRotationInDegrees() {
@@ -98,7 +89,7 @@ public class SwerveModule {
     }
 
     private void setRotation(double degrees) {
-        rotationPID.setSetpoint(degrees);
+        rotationController.setSetpoint(degrees, rotationEncoder.getAbsolutePosition().getValueAsDouble());
     }
 
     public double getDriveVelocity() {
